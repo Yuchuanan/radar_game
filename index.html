@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>定位雷达</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: sans-serif;
+      background: #523F8B;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 20px;
+      font-size: 2em;
+    }
+    .controls {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 16px;
+      min-width: 200px;
+    }
+    .card label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 0.9em;
+    }
+    .card input[type="number"] {
+      width: 100%;
+      padding: 6px;
+      border: none;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+    .card button {
+      width: 100%;
+      padding: 8px;
+      background: #FFC107;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1em;
+      color: #333;
+    }
+    .card button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    #grid {
+      display: grid;
+      background: rgba(255,255,255,0.1);
+      padding: 16px;
+      border-radius: 8px;
+      gap: 10px;
+    }
+    .cell {
+      width: 60px;
+      height: 60px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 4px;
+      transition: background 0.4s;
+    }
+    .cell.target-flash {
+      animation: flash-target 0.8s ease-in-out;
+    }
+    .cell.input-flash {
+      animation: flash-input 0.8s ease-in-out;
+    }
+    @keyframes flash-target {
+      0%,100% { background: rgba(76,175,80,0.4); }
+      50%    { background: #4CAF50; }
+    }
+    @keyframes flash-input {
+      0%,100% { background: rgba(76,175,80,0.4); }
+      50%    { background: #4CAF50; }
+    }
+    .modal {
+      position: fixed; top:0; left:0; right:0; bottom:0;
+      background: rgba(0,0,0,0.5);
+      display: flex; justify-content: center; align-items: center;
+    }
+    .modal.hidden { display: none; }
+    .modal-content {
+      background: #fff; color: #333;
+      padding: 20px; border-radius: 8px;
+      text-align: center;
+      min-width: 200px;
+    }
+    .modal-content button {
+      margin-top: 12px;
+      background: #523F8B;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>定位雷达</h1>
+  <div class="controls">
+    <div class="card" id="sizeCard">
+      <label>行：<input type="number" id="rowsInput" min="1" value="5"></label>
+      <label>列：<input type="number" id="colsInput" min="1" value="7"></label>
+      <button id="setSizeBtn">生成地图</button>
+      <button id="showTargetBtn" style="margin-top:8px; display:none;">显示目标</button>
+    </div>
+    <div class="card" id="coordCard" style="display:none;">
+      <label>行：<input type="number" id="rowInput" min="1" placeholder="1～"></label>
+      <label>列：<input type="number" id="colInput" min="1" placeholder="1～"></label>
+      <button id="locateBtn">定位</button>
+      <button id="restartBtn" style="margin-top:8px; display:none;">重新开始</button>
+    </div>
+  </div>
+
+  <div id="grid"></div>
+
+  <div class="modal hidden" id="modal">
+    <div class="modal-content">
+      <p id="modalMessage"></p>
+      <button id="modalCloseBtn">确定</button>
+    </div>
+  </div>
+
+  <script>
+    const colsInput = document.getElementById('colsInput');
+    const rowsInput = document.getElementById('rowsInput');
+    const setSizeBtn = document.getElementById('setSizeBtn');
+    const showTargetBtn = document.getElementById('showTargetBtn');
+    const coordCard = document.getElementById('coordCard');
+    const rowInput = document.getElementById('rowInput');
+    const colInput = document.getElementById('colInput');
+    const locateBtn = document.getElementById('locateBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const gridEl    = document.getElementById('grid');
+    const modal     = document.getElementById('modal');
+    const modalMsg  = document.getElementById('modalMessage');
+    const modalCloseBtn = document.getElementById('modalCloseBtn');
+
+    let targetRow, targetCol;
+    let rows, cols;
+
+    setSizeBtn.addEventListener('click', () => {
+      cols = parseInt(colsInput.value);
+      rows = parseInt(rowsInput.value);
+      if (cols < 1 || rows < 1) return;
+      createGrid(rows, cols);
+      pickTarget();
+      const cell = document.querySelector(`.cell[data-row="${targetRow}"][data-col="${targetCol}"]`);
+      cell.classList.add('target-flash');
+      setTimeout(()=> cell.classList.remove('target-flash'), 800);
+      coordCard.style.display = 'block';
+      restartBtn.style.display = 'none';
+      showTargetBtn.style.display = 'block';
+    });
+
+    showTargetBtn.addEventListener('click', () => {
+      const cell = document.querySelector(`.cell[data-row="${targetRow}"][data-col="${targetCol}"]`);
+      cell.classList.add('target-flash');
+      setTimeout(()=> cell.classList.remove('target-flash'), 800);
+    });
+
+    locateBtn.addEventListener('click', async () => {
+      const r = parseInt(rowInput.value);
+      const c = parseInt(colInput.value);
+      if (!r||!c || r<1||r>rows||c<1||c>cols) return;
+      const targetCell = document.querySelector(`.cell[data-row="${targetRow}"][data-col="${targetCol}"]`);
+      const inputCell  = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+      await animateCell(targetCell, 'target-flash');
+      await animateCell(inputCell,  'input-flash');
+      const success = (r===targetRow && c===targetCol);
+      showModal(success ? '定位成功！' : '定位失败！');
+      restartBtn.style.display = 'block';
+    });
+
+    modalCloseBtn.addEventListener('click', () => {
+      modal.classList.add('hidden');
+    });
+
+    restartBtn.addEventListener('click', () => {
+      pickTarget();
+      restartBtn.style.display = 'none';
+      rowInput.value = '';
+      colInput.value = '';
+    });
+
+    function createGrid(r, c) {
+      gridEl.innerHTML = '';
+      gridEl.style.gridTemplateColumns = `repeat(${c}, 60px)`;
+      gridEl.style.gridTemplateRows    = `repeat(${r}, 60px)`;
+      gridEl.style.display = 'grid';
+      for (let i=1; i<=r; i++) {
+        for (let j=1; j<=c; j++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.row = i;
+          cell.dataset.col = j;
+          gridEl.appendChild(cell);
+        }
+      }
+    }
+
+    function pickTarget() {
+      targetRow = Math.floor(Math.random() * rows) + 1;
+      targetCol = Math.floor(Math.random() * cols) + 1;
+      console.log('目标:', targetRow, targetCol);
+    }
+
+    function animateCell(cell, cls) {
+      return new Promise(res => {
+        cell.classList.add(cls);
+        setTimeout(() => {
+          cell.classList.remove(cls);
+          res();
+        }, 800);
+      });
+    }
+
+    function showModal(text) {
+      modalMsg.textContent = text;
+      modal.classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
